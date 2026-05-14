@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const cron = require('node-cron'); // Cron job লাইব্রেরি
+const cron = require('node-cron');
 
 const app = express();
 
@@ -17,11 +17,8 @@ mongoose.connect(MONGO_URI)
   .catch((err) => console.error("❌ Connection Error:", err));
 
 // --- Cron Job: সার্ভারকে সচল রাখা ---
-// প্রতি ১০ মিনিট পর পর এটি চলবে
 cron.schedule('*/10 * * * *', () => {
   console.log('⏰ Cron Job running: Keeping server awake...');
-  // এখানে আপনি আপনার সার্ভারের নিজস্ব কোনো রাউট কল করতে পারেন
-  // অথবা শুধু কনসোল লগ দিয়েও কানেকশন সচল রাখা সম্ভব
 });
 
 // --- Database Models ---
@@ -47,6 +44,8 @@ const transactionSchema = new mongoose.Schema({
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
 // --- API Routes ---
+
+// ১. সব ফান্ড লিস্ট আনা
 app.get('/api/funds', async (req, res) => {
   try {
     const funds = await Fund.find().sort({ createdAt: -1 });
@@ -56,6 +55,18 @@ app.get('/api/funds', async (req, res) => {
   }
 });
 
+// ২. নির্দিষ্ট ফান্ডের বিস্তারিত আনা (এটি আগের কোডে মিসিং ছিল)
+app.get('/api/funds/:id', async (req, res) => {
+  try {
+    const fund = await Fund.findById(req.params.id);
+    if (!fund) return res.status(404).json({ message: "Fund not found" });
+    res.json(fund);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ৩. নতুন ফান্ড তৈরি
 app.post('/api/funds', async (req, res) => {
   try {
     const newFund = new Fund(req.body);
@@ -66,6 +77,7 @@ app.post('/api/funds', async (req, res) => {
   }
 });
 
+// ৪. ফান্ড আপডেট
 app.put('/api/funds/:id', async (req, res) => {
   try {
     const { name, logo, description } = req.body;
@@ -76,6 +88,7 @@ app.put('/api/funds/:id', async (req, res) => {
   }
 });
 
+// ৫. ফান্ড ডিলিট
 app.delete('/api/funds/:id', async (req, res) => {
   try {
     const fundId = req.params.id;
@@ -87,6 +100,7 @@ app.delete('/api/funds/:id', async (req, res) => {
   }
 });
 
+// ৬. ট্রানজেকশন যোগ করা
 app.post('/api/transactions', async (req, res) => {
   try {
     const { fundId, type, amount, category, donorName, expenseBy, note, date } = req.body;
@@ -100,6 +114,7 @@ app.post('/api/transactions', async (req, res) => {
   }
 });
 
+// ৭. ট্রানজেকশন ডিলিট
 app.delete('/api/transactions/:id', async (req, res) => {
     try {
         const transaction = await Transaction.findById(req.params.id);
@@ -113,6 +128,7 @@ app.delete('/api/transactions/:id', async (req, res) => {
     }
 });
 
+// ৮. নির্দিষ্ট ফান্ডের সব লেনদেন দেখা
 app.get('/api/transactions/:fundId', async (req, res) => {
   try {
     const history = await Transaction.find({ fundId: req.params.fundId }).sort({ date: -1 });
@@ -122,6 +138,7 @@ app.get('/api/transactions/:fundId', async (req, res) => {
   }
 });
 
+// ৯. ড্যাশবোর্ড সামারি
 app.get('/api/summary', async (req, res) => {
   try {
     const funds = await Fund.find();
