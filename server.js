@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cron = require('node-cron'); // Cron job লাইব্রেরি
 
 const app = express();
 
@@ -15,20 +16,24 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ Database Connected: Madrasha Management System"))
   .catch((err) => console.error("❌ Connection Error:", err));
 
-// --- Database Models ---
+// --- Cron Job: সার্ভারকে সচল রাখা ---
+// প্রতি ১০ মিনিট পর পর এটি চলবে
+cron.schedule('*/10 * * * *', () => {
+  console.log('⏰ Cron Job running: Keeping server awake...');
+  // এখানে আপনি আপনার সার্ভারের নিজস্ব কোনো রাউট কল করতে পারেন
+  // অথবা শুধু কনসোল লগ দিয়েও কানেকশন সচল রাখা সম্ভব
+});
 
-// ১. ফান্ড ক্যাটাগরি (logo ফিল্ড যোগ করা হয়েছে)
+// --- Database Models ---
 const fundSchema = new mongoose.Schema({
   name: { type: String, required: true },
   balance: { type: Number, default: 0 },
-  logo: { type: String, default: "" }, // লোগো URL এর জন্য
+  logo: { type: String, default: "" },
   description: String,
   createdAt: { type: Date, default: Date.now }
 });
-
 const Fund = mongoose.model('Fund', fundSchema);
 
-// ২. ট্রানজেকশন
 const transactionSchema = new mongoose.Schema({
   fundId: { type: mongoose.Schema.Types.ObjectId, ref: 'Fund', required: true },
   type: { type: String, enum: ['income', 'expense'], required: true },
@@ -39,12 +44,9 @@ const transactionSchema = new mongoose.Schema({
   note: String,
   date: { type: Date, default: Date.now }
 });
-
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
 // --- API Routes ---
-
-// [GET] সকল ফান্ড দেখা
 app.get('/api/funds', async (req, res) => {
   try {
     const funds = await Fund.find().sort({ createdAt: -1 });
@@ -54,7 +56,6 @@ app.get('/api/funds', async (req, res) => {
   }
 });
 
-// [POST] নতুন ফান্ড খোলা
 app.post('/api/funds', async (req, res) => {
   try {
     const newFund = new Fund(req.body);
@@ -65,70 +66,46 @@ app.post('/api/funds', async (req, res) => {
   }
 });
 
-/** 
- * ৩. ফান্ড এডিট (Update) 
- * [PUT] /api/funds/:id
- */
 app.put('/api/funds/:id', async (req, res) => {
   try {
     const { name, logo, description } = req.body;
-    const updatedFund = await Fund.findByIdAndUpdate(
-      req.params.id,
-      { name, logo, description },
-      { new: true } // এটি আপডেট হওয়া নতুন ডাটা রিটার্ন করবে
-    );
+    const updatedFund = await Fund.findByIdAndUpdate(req.params.id, { name, logo, description }, { new: true });
     res.json(updatedFund);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-/** 
- * ৪. ফান্ড ডিলিট (Delete)
- * [DELETE] /api/funds/:id
- * নোট: এটি ডিলিট করলে ওই ফান্ডের সব ট্রানজেকশনও ডিলিট করা ভালো।
- */
 app.delete('/api/funds/:id', async (req, res) => {
   try {
     const fundId = req.params.id;
-    // ১. ফান্ডের সব ট্রানজেকশন ডিলিট করুন
     await Transaction.deleteMany({ fundId: fundId });
-    // ২. ফান্ড ডিলিট করুন
     await Fund.findByIdAndDelete(fundId);
-    
     res.json({ message: "Fund and all related transactions deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// --- লেনদেন (Transactions) রাউটস ---
-
 app.post('/api/transactions', async (req, res) => {
   try {
     const { fundId, type, amount, category, donorName, expenseBy, note, date } = req.body;
     const transaction = new Transaction({ fundId, type, amount, category, donorName, expenseBy, note, date });
     await transaction.save();
-
     const updateAmount = type === 'income' ? amount : -amount;
     await Fund.findByIdAndUpdate(fundId, { $inc: { balance: updateAmount } });
-
     res.status(201).json({ message: "Transaction Successful", transaction });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
 
-// ট্রানজেকশন ডিলিট করার রাউট (প্রয়োজন হলে)
 app.delete('/api/transactions/:id', async (req, res) => {
     try {
         const transaction = await Transaction.findById(req.params.id);
         if (!transaction) return res.status(404).json({ message: "Transaction not found" });
-
-        // ফান্ডের ব্যালেন্স রিভার্স করা (ডিলিট করলে ব্যালেন্স ঠিক করতে হবে)
         const reverseAmount = transaction.type === 'income' ? -transaction.amount : transaction.amount;
         await Fund.findByIdAndUpdate(transaction.fundId, { $inc: { balance: reverseAmount } });
-
         await Transaction.findByIdAndDelete(req.params.id);
         res.json({ message: "Transaction deleted and balance adjusted" });
     } catch (err) {
@@ -152,12 +129,7 @@ app.get('/api/summary', async (req, res) => {
     const today = new Date();
     today.setHours(0,0,0,0);
     const todayStats = await Transaction.find({ date: { $gte: today } });
-    
-    res.json({
-      totalCommonBalance: totalBalance,
-      totalFunds: funds.length,
-      todayActivity: todayStats.length
-    });
+    res.json({ totalCommonBalance: totalBalance, totalFunds: funds.length, todayActivity: todayStats.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
